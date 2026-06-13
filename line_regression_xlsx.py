@@ -8,7 +8,7 @@ file_name = "/home/xrix/Documents/py_progect/ML/ML_edication/data.xlsx"
 
 
 # name of collums-parametrs (x) and target colums (Y)
-feature_columns = ["feature1", "feature2"]  # and more parametrs
+feature_columns = ["feature2"]  # and more parametrs
 target_column = "target"  # predicting
 
 # 1. ------- uploading data ------
@@ -33,9 +33,54 @@ print(f"Intercept (bias): {model.intercept_:.4f}")  # value at zero
 for col, coef in zip(feature_columns, model.coef_):
 	print(f"coefficients for {col}: {coef:.4f}")
 
-# 3. ---- visualization (work for 2-parametrs) ---- 
+# 3. ---- visualization (work for 1-parametr) ----
+if len(feature_columns) == 1:
+	print("\nBilding interactive 2D-chart...")
+
+	# creating a range of points for plotting a straight line
+	x_min, x_max = X[:,0].min() - 1, X[:,0].max() + 1
+	x_range = np.linspace(x_min, x_max, 100).reshape(-1, 1)
+
+	# preducting the value Y (line)
+	y_line = model.predict(x_range)
+
+	# creating 2D grid with Plotly
+	fig = go.Figure()
+
+	# add the real points from Excel
+	fig.add_trace(
+		go.Scatter(
+			x=X[:, 0],
+			y=y,
+			mode="markers",
+			marker=dict(size=8, color="red"),
+			name="Real data",
+		)
+	)
+
+	# add line regression
+	fig.add_trace(
+		go.Scatter(
+			x=x_range.ravel(),
+			y=y_line,
+			mode="lines",
+			line=dict(color="blue", width=2),
+			name="Line regresson",
+		)
+	)
+
+	# axis setting
+	fig.update_layout(
+		title="Line regresson: Line of predictions",
+		xaxis_title=feature_columns[0],
+		yaxis_title=target_column,
+	)
+
+	fig.show()
+
+# 4. ---- visualization (work for 2-parametrs) ---- 
 if len(feature_columns) == 2:
-	print("\nBilding interactive chart")
+	print("\nBilding interactive 3D-chart...")
 
 	# creating a grid for constructing the regression plane
 	x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
@@ -95,7 +140,7 @@ else:
 		f"\nThe model has been successfully trained for {len(feature_columns)} parameters."
 	)
 	print(
-		"3D visualization is available for exactly two independent parameters."
+		"Visualization is available only for 1 (2D) or 2 (3D) independent parameters."
 	)
 
 
