@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error  # MSE
 import plotly.graph_objects as go
 
 # 0. ------- settings --------
@@ -27,11 +28,18 @@ y = df[target_column].values
 model = LinearRegression()
 model.fit(X,y)
 
+# make a prediction on the same data to calculate the erro
+y_pred = model.predict(X)
+
+# count wrong MSE
+mse_value = mean_squared_error(y, y_pred)
+
 # exit coefficients of the equation
-print("\n---result of training---")
+print("\n---result of training and grade---")
 print(f"Intercept (bias): {model.intercept_:.4f}")  # value at zero
 for col, coef in zip(feature_columns, model.coef_):
 	print(f"coefficients for {col}: {coef:.4f}")
+print(f"MSE of model: {mse_value:.4f}")
 
 # 3. ---- visualization (work for 1-parametr) ----
 if len(feature_columns) == 1:
@@ -65,7 +73,7 @@ if len(feature_columns) == 1:
 			y=y_line,
 			mode="lines",
 			line=dict(color="blue", width=2),
-			name="Line regresson",
+			name=f"Line regresson (MSE: {mse_value:.2f})",  #MSE legend
 		)
 	)
 
@@ -123,7 +131,7 @@ if len(feature_columns) == 2:
 
 	# axis settings matching your column names
 	fig.update_layout(
-		title="Linear Regression: Prediction Plane",
+		title="Linear Regression: Prediction Plane | MSE: {mse_value:.2f}",
 		scene=dict(
 			xaxis_title=feature_columns[0],
 			yaxis_title=feature_columns[1],
