@@ -23,6 +23,9 @@ except Exception as e:
 X_train = torch.tensor(df[FEATURE_COLUMNS].values, dtype=torch.float32)
 y_train = torch.tensor(df[TARGET_COLUMN].values, dtype=torch.float32).view(-1, 1)
 
+# calculate the average value of y for the formula R^2
+y_mean = torch.mean(y_train)
+
 # 2. creating model "underground"
 # weight initialized with random values.
 # the number of weights equals the number of feature columns.
@@ -53,18 +56,34 @@ for epoch in range(NUM_EPOCHS):
 		b.grad.zero_()
 		
 	if (epoch + 1) % 400 == 0:
-		print(f"epoch {epoch+1}/{NUM_EPOCHS} | current MSE Loss: {loss.item():.4f}")
+        # сalculation of R² for the current epoch 
+		with torch.no_grad():
+			ss_res = torch.sum((y_train - y_pred) ** 2)
+			ss_tot = torch.sum((y_train - y_mean) ** 2)
+			r2_current = 1 - (ss_res / ss_tot) # 1 = ideal
+		
+		print(f"epoch {epoch+1}/{NUM_EPOCHS} | current MSE Loss: {loss.item():.3f} | RMSE {(loss.item())**0.5:.3f} | R^2 {r2_current.item():.3f}")
 
 # finel parameters and error
 final_mse = loss.item()
 W_final = W.detach().numpy().flatten()
 b_final = b.item()
 
+# calculate the final R^2 after completing the training
+with torch.no_grad():
+    y_pred_final = X_train @ W + b
+    ss_res = torch.sum((y_train - y_pred_final) ** 2)
+    ss_tot = torch.sum((y_train - y_mean) ** 2)
+    final_r2 = 1 - (ss_res / ss_tot)
+    final_r2_val = final_r2.item()
+
 print("\n--- update PyTorch compleated ---")
-print(f"final Intercept (b): {b_final:.4f}")
+print(f"final Intercept (b): {b_final:.3f}")
 for col, weight in zip(FEATURE_COLUMNS, W_final):
-	print(f"final weight for {col}: {weight:.4f}")
-print(f"MSE: {final_mse:.4f}")
+	print(f"final weight for {col}: {weight:.3f}")
+print(f"MSE: {final_mse:.3f}")
+print(f"RMSE {(loss.item())**0.5:.3f}")
+print(f"R^2: {final_r2_val:.3f}")
 
 
 # 4. visiolization result
@@ -81,8 +100,8 @@ if len(FEATURE_COLUMNS) == 1:
 
 	fig = go.Figure()
 	fig.add_trace(go.Scatter(x=X_train.numpy().flatten(), y=y_train.numpy().flatten(), mode="markers", marker=dict(size=10, color="red"), name="Data"))
-	fig.add_trace(go.Scatter(x=x_range.ravel(), y=y_line.ravel(), mode="lines", line=dict(color="blue", width=2), name=f"Линия PyTorch (MSE: {final_mse:.2f})"))
-	fig.update_layout(title=f"PyTorch line regression | MSE = {final_mse:.3f}", xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
+	fig.add_trace(go.Scatter(x=x_range.ravel(), y=y_line.ravel(), mode="lines", line=dict(color="blue", width=2), name=f"line PyTorch (MSE: {final_mse:.2f})"))
+	fig.update_layout(title=f"PyTorch line regression | MSE = {final_mse:.3f} | RMSE {(loss.item())**0.5:.3f} | R^2 = {final_r2_val:.3f}", xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
 	fig.show()
 
 elif len(FEATURE_COLUMNS) == 2:
@@ -99,5 +118,5 @@ elif len(FEATURE_COLUMNS) == 2:
 	fig = go.Figure()
 	fig.add_trace(go.Scatter3d(x=X_train[:, 0].numpy(), y=X_train[:, 1].numpy(), z=y_train.numpy().flatten(), mode="markers", marker=dict(size=5, color="red"), name="Data"))
 	fig.add_trace(go.Surface(x=x_range, y=y_range, z=z_mesh, colorscale="Blues", opacity=0.6, name="Plane PyTorch", showscale=False))
-	fig.update_layout(title=f"PyTorch regression (3D) | MSE = {final_mse:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
+	fig.update_layout(title=f"PyTorch regression (3D) | MSE = {final_mse:.3f} | RMSE {(loss.item())**0.5:.3f} | R^2 = {final_r2_val:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
 	fig.show()
