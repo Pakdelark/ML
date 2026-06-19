@@ -11,14 +11,14 @@ FEATURE_COLUMNS = ["f1","feature2"]  # set a value ['feature1', 'feature2']
 TARGET_COLUMN = "target"
 NUM_EPOCHS = 10000			   # count step edication
 LEARNING_RATE = 0.1			# speed edication (step gradient)
-POLY_DEGREE = 3		 # polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
+POLY_DEGREE = 3	 # polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
 TEST_FILE_NAME = "test_data.xlsx" # data for test
 
 # mode work 
 # True -> traning model and save to file
 # False -> uploading ready model from file 
-TRAIN_MODE = False
+TRAIN_MODE = True
 
 
 
@@ -123,7 +123,9 @@ if TRAIN_MODE:
 		'X_max': X_max,
 		'X_range_diff': X_range_diff,
 		'r2': r2_current,
-		'mse': loss.item()
+		'mse': loss.item(),
+		'columns': FEATURE_COLUMNS,
+		'degree': POLY_DEGREE
 	}, MODEL_FILE)
 	print(f"The model has been successfully saved to file:{MODEL_FILE}")
 else:
@@ -142,6 +144,22 @@ else:
 	final_r2_val = checkpoint['r2']
 	final_mse = checkpoint['mse']
 	print("The model successfully loaded! Training cycle skipped")
+	print("---------------------------------")
+
+	# retrieve saved settings (with protection against old save files)
+	saved_columns = checkpoint.get('columns', None)
+	saved_degree = checkpoint.get('degree', None)
+
+	# verification of the number of weights against current settings
+	if saved_columns != FEATURE_COLUMNS or saved_degree != POLY_DEGREE:
+		print(f"[ERROR] the saved model {W.shape[0]}, does not match {generate_poly_features(X_scaled, POLY_DEGREE).shape[1]}")
+		if saved_columns != FEATURE_COLUMNS:
+			print(f"  • columns in the file: {saved_columns} | current setting: {FEATURE_COLUMNS}")
+		if saved_degree != POLY_DEGREE:
+			print(f"  • polinomial degree in the file: {saved_degree} | current setting: {POLY_DEGREE}")
+		print("---------------------------------")
+		print("please set TRAIN_MODE = True to retrain the model with the new parameters")
+		exit()
 
 # finel parameters and error
 W_final = W.detach().numpy().flatten()
