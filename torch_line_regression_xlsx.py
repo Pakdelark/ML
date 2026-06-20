@@ -9,11 +9,11 @@ import plotly.graph_objects as go
 FILE_NAME = "data.xlsx"				# main traning dataset 
 TEST_FILE_NAME = "test_data.xlsx"	# data for test
 FEATURE_COLUMNS = []				# read from the file data.xlsx
-TARGET_COLUMN = "target"			# read last column from the file data.xlsx
+TARGET_COLUMN = None				# read last column from the file data.xlsx
 X_TEST = None						# read from the file test_data
 NUM_EPOCHS = 10000					# count step edication
 LEARNING_RATE = 0.1					# speed edication (step gradient)
-POLY_DEGREE = 3						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
+POLY_DEGREE = 2						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
 
 
@@ -25,12 +25,47 @@ TRAIN_MODE = True
 # 1. loading and preparing tensors
 try:
 	df = pd.read_excel(FILE_NAME)
+	# remove system index columns often created by Excel/Pandas
+	df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+	# remove any rows containing empty cells (protection against NoneType and NaN)
+	df = df.dropna()
 except Exception as e:
-	print(f"File read error: {e}")
+	print(f"[CRITICAL ERROR] failed to process the main file: {e}")
+	exit()
+if df.empty or df.shape[1] < 2:
+	print("[CRITICAL ERROR] the table must contain at least two columns (column and target) and must not be empty!")
 	exit()
 
+# adaptive definition: The last column is always the target; everything else consists of features.
+TARGET_COLUMN = df.columns[-1]
 FEATURE_COLUMNS = [col for col in df.columns if col != TARGET_COLUMN]
-print(f"Features for training automatically detected: {FEATURE_COLUMNS}")
+print(f"Features for training automatically detected: {FEATURE_COLUMNS} -> [{TARGET_COLUMN}]")
+
+# check of the test file
+df_test = None
+if os.path.exists(TEST_FILE_NAME):
+	try:
+		df_test = pd.read_excel(TEST_FILE_NAME)
+		df_test = df_test.loc[:, ~df_test.columns.str.contains('^Unnamed')].dropna()
+		
+		missing_cols = [col for col in FEATURE_COLUMNS if col not in df_test.columns]
+		if missing_cols:
+			print(f"[CRITICAL ERROR] test file is missing the required feature columns: {missing_cols}")
+			exit()
+		print("--- test file passed validation successfully ---")
+	except Exception as e:
+		print(f"[CRITICAL ERROR] test file validation error: {e}")
+		exit()
+
+# Extraction of raw matrices
+X_raw = df[FEATURE_COLUMNS].values
+y_raw = df[TARGET_COLUMN].values.reshape(-1, 1)
+
+# Data Scaling
+X_min = X_raw.min(axis=0)
+X_max = X_raw.max(axis=0)
+X_range_diff = np.where((X_max - X_min) == 0, 1, X_max - X_min)
+X_scaled = (X_raw - X_min) / X_range_diff
 
 # checking visualization constraints
 if len(FEATURE_COLUMNS) > 2:
@@ -172,7 +207,6 @@ else:
 W_final = W.detach().numpy().flatten()
 b_final = b.item()
 
-print("\n--- update PyTorch completed ---")
 print(f"final Intercept (b): {b_final:.3f}")
 print(f"final weights: {np.round(W_final, 3)}")
 print(f"Train MSE: {final_mse:.3f} | Train RMSE {final_mse**0.5:.3f} | Train R^2: {final_r2_val:.3f}")
@@ -181,6 +215,7 @@ print("---------------------------------")
 
 # function for obtaining predictions from trained tensors
 def predict_poly_torch(X_np):
+	X_np = np.array(X_np).reshape(-1, len(FEATURE_COLUMNS))
 	X_np_scaled = (X_np - X_min) / X_range_diff  # scaling the test grid 
 	X_poly = generate_poly_features(X_np_scaled, POLY_DEGREE)
 	with torch.no_grad():
@@ -188,41 +223,31 @@ def predict_poly_torch(X_np):
 
 # calculate the prediction for the manual test set X_TEST
 X_test_np, y_test_true, y_test_pred = None, None, None
-if os.path.exists(TEST_FILE_NAME):
-	try:
-		df_test = pd.read_excel(TEST_FILE_NAME)
-		# check all need signs in the test_file
-		missing_cols = [col for col in FEATURE_COLUMNS if col not in df_test.columns]
-		if missing_cols:
-			print(f"[ERROR] the test file is missing the required columns: {missing_cols}")
-			X_test_np = None
-		else:
-			# extract data strictly based on the training feature names
-			X_test_np = df_test[FEATURE_COLUMNS].values
-			y_test_pred = predict_poly_torch(X_test_np)
-			print("\n--- Test file loaded successfully ---")
+if df_test is not None:
+	X_test_np = df_test[FEATURE_COLUMNS].values
+	y_test_pred = predict_poly_torch(X_test_np)
 
-		# if the test file contains a column with the actual answers, we calculate deviation metrics
-		if TARGET_COLUMN in df_test.columns:
-			y_test_true = df_test[TARGET_COLUMN].values.reshape(-1, 1)
+	# if the test file contains a column with the actual answers, we calculate deviation metrics
+	if TARGET_COLUMN in df_test.columns:
+		y_test_true = df_test[TARGET_COLUMN].values.reshape(-1, 1)
 
-			# Count test MSE and R^2 via tenzors 
-			y_test_true_t = torch.tensor(y_test_true, dtype=torch.float32)
-			y_test_pred_t = torch.tensor(y_test_pred, dtype=torch.float32)
-			
-			test_mse = torch.mean((y_test_pred_t - y_test_true_t) ** 2).item()
-			
-			ss_res = torch.sum((y_test_true_t - y_test_pred_t) ** 2)
-			ss_tot = torch.sum((y_test_true_t - torch.mean(y_test_true_t)) ** 2)
-			test_r2 = (1 - (ss_res / ss_tot)).item() if ss_tot != 0 else 0.0
-			print(f"Test MSE (aberration): {test_mse:.3f} | Test RMSE: {test_mse**0.5:.3f} | Test R^2: {test_r2:.3f}")
-		else:
-			print("Note: Target column missing in test file. Calculating predictions only.")
-			for i, x_t in enumerate(X_test_np):
-				print(f"Point {i+1} | X = {x_t} -> Predicted Y = {y_test_pred[i][0]:.3f}")
-	except Exception as e:
-		print(f"Warning: Failed to process test file: {e}. Skipping test stage.")
-		X_test_np = None
+		# Count test MSE and R^2 via tenzors 
+		y_test_true_t = torch.tensor(y_test_true, dtype=torch.float32)
+		y_test_pred_t = torch.tensor(y_test_pred, dtype=torch.float32)
+		
+		# calculate the true deviation of predictions from the test of initial responses.
+		test_mse = torch.mean((y_test_pred_t - y_test_true_t) ** 2).item()
+		
+		ss_res = torch.sum((y_test_true_t - y_test_pred_t) ** 2)
+		y_test_true_mean = torch.mean(y_test_true_t)
+		ss_tot = torch.sum((y_test_true_t - y_test_true_mean) ** 2)
+		
+		test_r2 = (1 - (ss_res / ss_tot)).item() if ss_tot != 0 else 0.0
+		print(f"Test MSE (aberration): {test_mse:.3f} | Test RMSE: {test_mse**0.5:.3f} | Test R^2: {test_r2:.3f}")
+	else:
+		print("Note: Target column missing in test file. Calculating predictions only.")
+		for i, x_t in enumerate(X_test_np):
+			print(f"Point {i+1} | X = {x_t} -> Predicted Y = {y_test_pred[i][0]:.3f}")
 else:
 	print(f"\nNote: Test file '{TEST_FILE_NAME}' not found. Visualizing training data only.")
 
@@ -232,10 +257,13 @@ if len(FEATURE_COLUMNS) == 1:
 	y_line = predict_poly_torch(x_grid)
 
 	fig = go.Figure()
-	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=10, color="red"), name="Excel data"))
+	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=5, color="red"), name="Excel data"))
 	fig.add_trace(go.Scatter(x=x_grid.ravel(), y=y_line.ravel(), mode="lines", line=dict(color="blue", width=2.5), name=f"Poly Line (R^2: {final_r2_val:.2f})"))
 	if X_test_np is not None:
-		fig.add_trace(go.Scatter(x=X_test_np.flatten(), y=y_test_pred.flatten(), mode="markers", marker=dict(size=10, color="green", symbol="diamond"), name="test prediction"))
+		x_display = X_test_np[:, 0]
+		y_display = y_test_true.flatten() if y_test_true is not None else y_test_pred.flatten()
+		name_display = "test real data" if y_test_true is not None else "test prediction"
+		fig.add_trace(go.Scatter(x=x_display.flatten(), y=y_display.flatten(), mode="markers", marker=dict(size=5, color="green", symbol="diamond"), name=name_display))
 	fig.update_layout(title=f"PyTorch Polynomial Regression (Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | R^2 = {final_r2_val:.3f}", xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
 	fig.show()
 
@@ -252,8 +280,31 @@ elif len(FEATURE_COLUMNS) == 2:
 
 	fig = go.Figure()
 	fig.add_trace(go.Scatter3d(x=X_raw[:, 0], y=X_raw[:, 1], z=y_raw.flatten(), mode="markers", marker=dict(size=5, color="red"), name="Exel data"))
-	fig.add_trace(go.Surface(x=x_range, y=y_range, z=z_mesh, colorscale="Blues", opacity=0.6, name="Plane PyTorch", showscale=False))
+	fig.add_trace(go.Surface(
+		x=x_range, 
+		y=y_range, 
+		z=z_mesh, 
+		colorscale="Blues", 
+		opacity=0.6, 
+		name="Plane PyTorch", 
+		showscale=False
+	))
 	if X_test_np is not None:
-		fig.add_trace(go.Scatter3d(x=X_test_np[:, 0], y=X_test_np[:, 1], z=y_test_pred.flatten(), mode="markers", marker=dict(size=5, color="green", symbol="diamond"), name="test prediction"))
+		# If the test set contains an answer column, we use it for the Z-axis; otherwise, we use the predictions.
+		if y_test_true is not None:
+			z_display = y_test_true.flatten()
+			name_display = "Тест (Реальные данные)"
+		else:
+			z_display = y_test_pred.flatten()
+			name_display = "Тест (Предсказание модели)"
+			
+		fig.add_trace(go.Scatter3d(
+			x=X_test_np[:, 0], 
+			y=X_test_np[:, 1], 
+			z=z_display, 
+			mode="markers", 
+			marker=dict(size=5, color="green", symbol="diamond"), 
+			name=name_display
+		))
 	fig.update_layout(title=f"PyTorch Poly Regression (3D Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | RMSE {final_mse**0.5:.3f} | R^2 = {final_r2_val:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
 	fig.show()
