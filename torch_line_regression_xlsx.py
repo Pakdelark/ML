@@ -13,7 +13,7 @@ TARGET_COLUMN = None				# read last column from the file data.xlsx
 X_TEST = None						# read from the file test_data
 NUM_EPOCHS = 10000					# count step edication
 LEARNING_RATE = 0.1					# speed edication (step gradient)
-POLY_DEGREE = 2						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
+POLY_DEGREE = 3						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
 
 
