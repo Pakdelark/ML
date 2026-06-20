@@ -6,21 +6,21 @@ import plotly.graph_objects as go
 
 
 # setting
-FILE_NAME = "data.xlsx"
-FEATURE_COLUMNS = ["f1","feature2"]  # set a value ['feature1', 'feature2']
-TARGET_COLUMN = "target"
-NUM_EPOCHS = 10000			   # count step edication
-LEARNING_RATE = 0.1			# speed edication (step gradient)
-POLY_DEGREE = 3	 # polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
+FILE_NAME = "data.xlsx"				# main traning dataset 
+TEST_FILE_NAME = "test_data.xlsx"	# data for test
+FEATURE_COLUMNS = []				# read from the file data.xlsx
+TARGET_COLUMN = "target"			# read last column from the file data.xlsx
+X_TEST = None						# read from the file test_data
+NUM_EPOCHS = 10000					# count step edication
+LEARNING_RATE = 0.1					# speed edication (step gradient)
+POLY_DEGREE = 3						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
-TEST_FILE_NAME = "test_data.xlsx" # data for test
+
 
 # mode work 
 # True -> traning model and save to file
 # False -> uploading ready model from file 
 TRAIN_MODE = True
-
-
 
 # 1. loading and preparing tensors
 try:
@@ -28,6 +28,13 @@ try:
 except Exception as e:
 	print(f"File read error: {e}")
 	exit()
+
+FEATURE_COLUMNS = [col for col in df.columns if col != TARGET_COLUMN]
+print(f"Features for training automatically detected: {FEATURE_COLUMNS}")
+
+# checking visualization constraints
+if len(FEATURE_COLUMNS) > 2:
+	print(f"[WARNING] detected {len(FEATURE_COLUMNS)} signs. Too many features for plotting")
 
 X_raw = df[FEATURE_COLUMNS].values
 y_raw = df[TARGET_COLUMN].values.reshape(-1, 1)
@@ -169,7 +176,7 @@ print("\n--- update PyTorch completed ---")
 print(f"final Intercept (b): {b_final:.3f}")
 print(f"final weights: {np.round(W_final, 3)}")
 print(f"Train MSE: {final_mse:.3f} | Train RMSE {final_mse**0.5:.3f} | Train R^2: {final_r2_val:.3f}")
-
+print("---------------------------------")
 
 
 # function for obtaining predictions from trained tensors
@@ -184,9 +191,16 @@ X_test_np, y_test_true, y_test_pred = None, None, None
 if os.path.exists(TEST_FILE_NAME):
 	try:
 		df_test = pd.read_excel(TEST_FILE_NAME)
-		X_test_np = df_test[FEATURE_COLUMNS].values
-		y_test_pred = predict_poly_torch(X_test_np)
-		print("\n--- Test file loaded successfully ---")
+		# check all need signs in the test_file
+		missing_cols = [col for col in FEATURE_COLUMNS if col not in df_test.columns]
+		if missing_cols:
+			print(f"[ERROR] the test file is missing the required columns: {missing_cols}")
+			X_test_np = None
+		else:
+			# extract data strictly based on the training feature names
+			X_test_np = df_test[FEATURE_COLUMNS].values
+			y_test_pred = predict_poly_torch(X_test_np)
+			print("\n--- Test file loaded successfully ---")
 
 		# if the test file contains a column with the actual answers, we calculate deviation metrics
 		if TARGET_COLUMN in df_test.columns:
@@ -201,7 +215,7 @@ if os.path.exists(TEST_FILE_NAME):
 			ss_res = torch.sum((y_test_true_t - y_test_pred_t) ** 2)
 			ss_tot = torch.sum((y_test_true_t - torch.mean(y_test_true_t)) ** 2)
 			test_r2 = (1 - (ss_res / ss_tot)).item() if ss_tot != 0 else 0.0
-			print(f"Test MSE (Отклонение): {test_mse:.3f} | Test RMSE: {test_mse**0.5:.3f} | Test R^2: {test_r2:.3f}")
+			print(f"Test MSE (aberration): {test_mse:.3f} | Test RMSE: {test_mse**0.5:.3f} | Test R^2: {test_r2:.3f}")
 		else:
 			print("Note: Target column missing in test file. Calculating predictions only.")
 			for i, x_t in enumerate(X_test_np):
@@ -241,5 +255,5 @@ elif len(FEATURE_COLUMNS) == 2:
 	fig.add_trace(go.Surface(x=x_range, y=y_range, z=z_mesh, colorscale="Blues", opacity=0.6, name="Plane PyTorch", showscale=False))
 	if X_test_np is not None:
 		fig.add_trace(go.Scatter3d(x=X_test_np[:, 0], y=X_test_np[:, 1], z=y_test_pred.flatten(), mode="markers", marker=dict(size=5, color="green", symbol="diamond"), name="test prediction"))
-	fig.update_layout(title=f"PyTorch Poly Regression (3D Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | RMSE {(loss.item())**0.5:.3f} | R^2 = {final_r2_val:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
+	fig.update_layout(title=f"PyTorch Poly Regression (3D Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | RMSE {final_mse**0.5:.3f} | R^2 = {final_r2_val:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
 	fig.show()
