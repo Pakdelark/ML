@@ -3,7 +3,12 @@ import numpy as np
 import pandas as pd
 import torch
 import plotly.graph_objects as go
-
+''' 
+future add: 
+- regularization L1 and L2
+- adaptive POLY_DEGREE
+- display of training parameters at test values
+'''
 
 # setting
 FILE_NAME = "data.xlsx"				# main traning dataset 
@@ -13,6 +18,7 @@ TARGET_COLUMN = None				# read last column from the file data.xlsx
 X_TEST = None						# read from the file test_data
 NUM_EPOCHS = 10000					# count step edication
 LEARNING_RATE = 0.1					# speed edication (step gradient)
+EARLY_STOP_TOLERANCE = 1e-7			# stopping criterion: if the weight changes by less than this value, training stops
 POLY_DEGREE = 3						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
 
@@ -123,9 +129,11 @@ if TRAIN_MODE:
 
 # 3. training cycle (Gradient descent)
 	for epoch in range(NUM_EPOCHS):
+		if epoch > 0:
+			W_old = W.clone().detach()
+			b_old = b.clone().detach()
 		# forward pass: calculate the prediction using the formula Y = X*W + b
 		y_pred = X_train @ W + b
-		
 		# calculating the MSE loss function manually using tensors
 		loss = torch.mean((y_pred - y_train) ** 2)
 		
@@ -140,7 +148,19 @@ if TRAIN_MODE:
 			# zero out the gradients before the next step
 			W.grad.zero_()
 			b.grad.zero_()
-			
+
+		# check the stopping criterion starting from the second epoch
+		if epoch > 0:
+			with torch.no_grad():
+				# calculate the maximum absolute change among the weights and the bias
+				w_change = torch.max(torch.abs(W - W_old)).item()
+				b_change = torch.abs(b - b_old).item()
+				
+				if w_change < EARLY_STOP_TOLERANCE and b_change < EARLY_STOP_TOLERANCE:
+					print(f"\n[Early Stopping] training has been halted at the epoch {epoch+1}")
+					print(f"The weights stabilized W: {w_change:.2e}, b: {b_change:.2e}")
+					break
+
 		if (epoch + 1) % 2000 == 0:  # print epoch every 5000
 			# сalculation of R² for the current epoch 
 			with torch.no_grad():
@@ -257,13 +277,13 @@ if len(FEATURE_COLUMNS) == 1:
 	y_line = predict_poly_torch(x_grid)
 
 	fig = go.Figure()
-	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=5, color="red"), name="Excel data"))
+	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=6, color="red"), name="Excel data"))
 	fig.add_trace(go.Scatter(x=x_grid.ravel(), y=y_line.ravel(), mode="lines", line=dict(color="blue", width=2.5), name=f"Poly Line (R^2: {final_r2_val:.2f})"))
 	if X_test_np is not None:
 		x_display = X_test_np[:, 0]
 		y_display = y_test_true.flatten() if y_test_true is not None else y_test_pred.flatten()
 		name_display = "test real data" if y_test_true is not None else "test prediction"
-		fig.add_trace(go.Scatter(x=x_display.flatten(), y=y_display.flatten(), mode="markers", marker=dict(size=5, color="green", symbol="diamond"), name=name_display))
+		fig.add_trace(go.Scatter(x=x_display.flatten(), y=y_display.flatten(), mode="markers", marker=dict(size=6, color="green", symbol="diamond"), name=name_display))
 	fig.update_layout(title=f"PyTorch Polynomial Regression (Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | R^2 = {final_r2_val:.3f}", xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
 	fig.show()
 
@@ -279,7 +299,7 @@ elif len(FEATURE_COLUMNS) == 2:
 	z_mesh = predict_poly_torch(grid_points).reshape(x_mesh.shape)
 
 	fig = go.Figure()
-	fig.add_trace(go.Scatter3d(x=X_raw[:, 0], y=X_raw[:, 1], z=y_raw.flatten(), mode="markers", marker=dict(size=5, color="red"), name="Exel data"))
+	fig.add_trace(go.Scatter3d(x=X_raw[:, 0], y=X_raw[:, 1], z=y_raw.flatten(), mode="markers", marker=dict(size=6, color="red"), name="Exel data"))
 	fig.add_trace(go.Surface(
 		x=x_range, 
 		y=y_range, 
@@ -293,17 +313,17 @@ elif len(FEATURE_COLUMNS) == 2:
 		# If the test set contains an answer column, we use it for the Z-axis; otherwise, we use the predictions.
 		if y_test_true is not None:
 			z_display = y_test_true.flatten()
-			name_display = "Тест (Реальные данные)"
+			name_display = "test real data"
 		else:
 			z_display = y_test_pred.flatten()
-			name_display = "Тест (Предсказание модели)"
+			name_display = "test model predictions"
 			
 		fig.add_trace(go.Scatter3d(
 			x=X_test_np[:, 0], 
 			y=X_test_np[:, 1], 
 			z=z_display, 
 			mode="markers", 
-			marker=dict(size=5, color="green", symbol="diamond"), 
+			marker=dict(size=6, color="green", symbol="diamond"), 
 			name=name_display
 		))
 	fig.update_layout(title=f"PyTorch Poly Regression (3D Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | RMSE {final_mse**0.5:.3f} | R^2 = {final_r2_val:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
