@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import torch
 import plotly.graph_objects as go
+from itertools import combinations_with_replacement
 ''' 
 future add: 
 - regularization L1 and L2
@@ -19,7 +20,7 @@ X_TEST = None						# read from the file test_data
 NUM_EPOCHS = 10000					# count step edication
 LEARNING_RATE = 0.1					# speed edication (step gradient)
 EARLY_STOP_TOLERANCE = 1e-7			# stopping criterion: if the weight changes by less than this value, training stops
-POLY_DEGREE = 3						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
+POLY_DEGREE = 4						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
 
 
@@ -63,20 +64,6 @@ if os.path.exists(TEST_FILE_NAME):
 		print(f"[CRITICAL ERROR] test file validation error: {e}")
 		exit()
 
-# Extraction of raw matrices
-X_raw = df[FEATURE_COLUMNS].values
-y_raw = df[TARGET_COLUMN].values.reshape(-1, 1)
-
-# Data Scaling
-X_min = X_raw.min(axis=0)
-X_max = X_raw.max(axis=0)
-X_range_diff = np.where((X_max - X_min) == 0, 1, X_max - X_min)
-X_scaled = (X_raw - X_min) / X_range_diff
-
-# checking visualization constraints
-if len(FEATURE_COLUMNS) > 2:
-	print(f"[WARNING] detected {len(FEATURE_COLUMNS)} signs. Too many features for plotting")
-
 X_raw = df[FEATURE_COLUMNS].values
 y_raw = df[TARGET_COLUMN].values.reshape(-1, 1)
 
@@ -92,22 +79,16 @@ X_scaled = (X_raw - X_min) / X_range_diff
 
 # function for manual polynomial feature generation
 def generate_poly_features(X_np, degree):
+	num_samples, num_features = X_np.shape
 	X_tensor = torch.tensor(X_np, dtype=torch.float32)
 	poly_list = []
 	
-	# for the degree 1 and higher adding basic signs and their degrees
+	# Automatic combine feature for every degree
 	for d in range(1, degree + 1):
-		poly_list.append(X_tensor ** d)
+		for combos in combinations_with_replacement(range(num_features), d):
+			current_feature = torch.prod(X_tensor[:, combos], dim=1, keepdim=True)
+			poly_list.append(current_feature)
 	
-	# if parametrs 2 and degree >= 2, adding their products (X1 * X2)
-	if X_np.shape[1] == 2 and degree >= 2:
-		x1 = X_tensor[:, 0:1]
-		x2 = X_tensor[:, 1:2]
-		poly_list.append(x1 * x2)
-		if degree >= 3:
-			poly_list.append((x1 ** 2) * x2)
-			poly_list.append(x1 * (x2 ** 2))
-			
 	return torch.cat(poly_list, dim=1)
 
 # generate polinomial signs for edication
@@ -125,7 +106,7 @@ if TRAIN_MODE:
 	b = torch.randn(1, requires_grad=True)
 
 	print(f"Initial random weights count: {W.shape[0]}")
-	print("Inistial bias (b):", b.item())
+	print(f"Initial bias (b): {b.item():.3f}")
 
 # 3. training cycle (Gradient descent)
 	for epoch in range(NUM_EPOCHS):
@@ -161,12 +142,12 @@ if TRAIN_MODE:
 					print(f"The weights stabilized W: {w_change:.2e}, b: {b_change:.2e}")
 					break
 
-		if (epoch + 1) % 2000 == 0:  # print epoch every 5000
+		if (epoch + 1) % 2000 == 0:  # print epoch every 2000
 			# сalculation of R² for the current epoch 
 			with torch.no_grad():
 				ss_res = torch.sum((y_train - y_pred) ** 2)
 				ss_tot = torch.sum((y_train - y_mean) ** 2)
-				r2_current = 1 - (ss_res / ss_tot) # 1 = ideal
+				r2_current = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0 # 1 = ideal
 			
 			print(f"epoch {epoch+1}/{NUM_EPOCHS} | current MSE Loss: {loss.item():.3f} | RMSE {(loss.item())**0.5:.3f} | R^2 {r2_current.item():.3f}")
 
@@ -175,7 +156,7 @@ if TRAIN_MODE:
 		with torch.no_grad():
 			ss_res = torch.sum((y_train - y_pred) ** 2)
 			ss_tot = torch.sum((y_train - y_mean) ** 2)
-			final_r2_val = (1 - (ss_res / ss_tot)).item()
+			final_r2_val = (1 - (ss_res / ss_tot)).item() if ss_tot != 0 else 0.0
 
 	# saving everything to disk (weights, bias and axis scales)
 	torch.save({
@@ -184,7 +165,7 @@ if TRAIN_MODE:
 		'X_min': X_min,
 		'X_max': X_max,
 		'X_range_diff': X_range_diff,
-		'r2': r2_current,
+		'r2': final_r2_val,
 		'mse': loss.item(),
 		'columns': FEATURE_COLUMNS,
 		'degree': POLY_DEGREE
@@ -243,6 +224,7 @@ def predict_poly_torch(X_np):
 
 # calculate the prediction for the manual test set X_TEST
 X_test_np, y_test_true, y_test_pred = None, None, None
+test_mse, test_r2 = None, None
 if df_test is not None:
 	X_test_np = df_test[FEATURE_COLUMNS].values
 	y_test_pred = predict_poly_torch(X_test_np)
@@ -271,20 +253,25 @@ if df_test is not None:
 else:
 	print(f"\nNote: Test file '{TEST_FILE_NAME}' not found. Visualizing training data only.")
 
+# generating titles for graphs
+title_text = f"PyTorch Poly Regression (Degree {POLY_DEGREE})<br>TRAIN: MSE = {final_mse:.3f} | R^2 = {final_r2_val:.3f}"
+if test_mse is not None and test_r2 is not None:
+    title_text += f"<br>TEST:   MSE = {test_mse:.3f} | R^2 = {test_r2:.3f}"
+
 # 4. visiolization result
 if len(FEATURE_COLUMNS) == 1:
 	x_grid = np.linspace(X_raw.min() - 1, X_raw.max() + 1, 300).reshape(-1, 1)
 	y_line = predict_poly_torch(x_grid)
 
 	fig = go.Figure()
-	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=6, color="red"), name="Excel data"))
+	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=10, color="red"), name="Excel data"))
 	fig.add_trace(go.Scatter(x=x_grid.ravel(), y=y_line.ravel(), mode="lines", line=dict(color="blue", width=2.5), name=f"Poly Line (R^2: {final_r2_val:.2f})"))
 	if X_test_np is not None:
 		x_display = X_test_np[:, 0]
 		y_display = y_test_true.flatten() if y_test_true is not None else y_test_pred.flatten()
 		name_display = "test real data" if y_test_true is not None else "test prediction"
-		fig.add_trace(go.Scatter(x=x_display.flatten(), y=y_display.flatten(), mode="markers", marker=dict(size=6, color="green", symbol="diamond"), name=name_display))
-	fig.update_layout(title=f"PyTorch Polynomial Regression (Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | R^2 = {final_r2_val:.3f}", xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
+		fig.add_trace(go.Scatter(x=x_display.flatten(), y=y_display.flatten(), mode="markers", marker=dict(size=10, color="green", symbol="diamond"), name=name_display))
+	fig.update_layout(title=title_text, xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
 	fig.show()
 
 elif len(FEATURE_COLUMNS) == 2:
@@ -310,7 +297,7 @@ elif len(FEATURE_COLUMNS) == 2:
 		showscale=False
 	))
 	if X_test_np is not None:
-		# If the test set contains an answer column, we use it for the Z-axis; otherwise, we use the predictions.
+		# if the test set contains an answer column, we use it for the Z-axis; otherwise, we use the predictions.
 		if y_test_true is not None:
 			z_display = y_test_true.flatten()
 			name_display = "test real data"
@@ -326,5 +313,5 @@ elif len(FEATURE_COLUMNS) == 2:
 			marker=dict(size=6, color="green", symbol="diamond"), 
 			name=name_display
 		))
-	fig.update_layout(title=f"PyTorch Poly Regression (3D Degree {POLY_DEGREE}) | MSE = {final_mse:.3f} | RMSE {final_mse**0.5:.3f} | R^2 = {final_r2_val:.3f}", scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
+	fig.update_layout(title=title_text, scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
 	fig.show()

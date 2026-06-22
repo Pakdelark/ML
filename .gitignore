@@ -1,4 +1,5 @@
 model_weights.pth
 .~lock.*
 .~lock.*#
+*.png
 
