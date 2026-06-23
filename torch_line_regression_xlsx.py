@@ -4,32 +4,27 @@ import pandas as pd
 import torch
 import plotly.graph_objects as go
 from itertools import combinations_with_replacement
-''' 
-future add: 
-- regularization L1 and L2
-- adaptive POLY_DEGREE
-- display of training parameters at test values
-'''
 
-# setting
+
+# 0. ----------- presetting -----------------------------
+
 FILE_NAME = "data.xlsx"				# main traning dataset 
 TEST_FILE_NAME = "test_data.xlsx"	# data for test
 FEATURE_COLUMNS = []				# read from the file data.xlsx
 TARGET_COLUMN = None				# read last column from the file data.xlsx
 X_TEST = None						# read from the file test_data
 NUM_EPOCHS = 10000					# count step edication
-LEARNING_RATE = 0.1					# speed edication (step gradient)
+LEARNING_RATE = 0.01				# speed edication (step gradient optimazer = ADAM)
 EARLY_STOP_TOLERANCE = 1e-7			# stopping criterion: if the weight changes by less than this value, training stops
 POLY_DEGREE = 4						# polinomial degree: 1 - linear, 2 - quadratic, 3 - cubic
 MODEL_FILE = "model_weights.pth"
-
 
 # mode work 
 # True -> traning model and save to file
 # False -> uploading ready model from file 
 TRAIN_MODE = True
 
-# 1. loading and preparing tensors
+# 1. ------------ loading and preparing tensors ---------------------
 try:
 	df = pd.read_excel(FILE_NAME)
 	# remove system index columns often created by Excel/Pandas
@@ -77,6 +72,8 @@ X_range_diff = np.where((X_max - X_min) == 0, 1, X_max - X_min)
 # scale x_raw to to the range [0, 1]
 X_scaled = (X_raw - X_min) / X_range_diff
 
+# 2. ---------- generate models and metrics ----------- 
+
 # function for manual polynomial feature generation
 def generate_poly_features(X_np, degree):
 	num_samples, num_features = X_np.shape
@@ -99,7 +96,7 @@ if TRAIN_MODE:
 	# calculate the average value of y for the formula R^2
 	y_mean = torch.mean(y_train)
 
-	# 2. creating model "underground"
+	# creating model
 	# weight initialized with random values.
 	# the number of weights equals the number of feature columns.
 	W = torch.randn(X_train.shape[1], 1, requires_grad=True)
@@ -108,7 +105,10 @@ if TRAIN_MODE:
 	print(f"Initial random weights count: {W.shape[0]}")
 	print(f"Initial bias (b): {b.item():.3f}")
 
-# 3. training cycle (Gradient descent)
+	# ADAM optimizer init
+	optimizer = torch.optim.Adam([W, b], lr=LEARNING_RATE)
+
+# 3. ----------- training cycle (Gradient descent) ---------------
 	for epoch in range(NUM_EPOCHS):
 		if epoch > 0:
 			W_old = W.clone().detach()
@@ -121,14 +121,11 @@ if TRAIN_MODE:
 		# backward pass: PyTorch calculate derivatives
 		loss.backward()
 		
-		# Update weights (Gradient descent step)
-		with torch.no_grad():
-			W -= LEARNING_RATE * W.grad
-			b -= LEARNING_RATE * b.grad
+		# Update weights (Gradient descent step) 
+		optimizer.step()
 			
-			# zero out the gradients before the next step
-			W.grad.zero_()
-			b.grad.zero_()
+		# zero out the gradients before the next step
+		optimizer.zero_grad()
 
 		# check the stopping criterion starting from the second epoch
 		if epoch > 0:
@@ -213,7 +210,6 @@ print(f"final weights: {np.round(W_final, 3)}")
 print(f"Train MSE: {final_mse:.3f} | Train RMSE {final_mse**0.5:.3f} | Train R^2: {final_r2_val:.3f}")
 print("---------------------------------")
 
-
 # function for obtaining predictions from trained tensors
 def predict_poly_torch(X_np):
 	X_np = np.array(X_np).reshape(-1, len(FEATURE_COLUMNS))
@@ -222,7 +218,8 @@ def predict_poly_torch(X_np):
 	with torch.no_grad():
 		return (X_poly @ W + b).numpy()
 
-# calculate the prediction for the manual test set X_TEST
+# 4. ----- calculate the prediction for the manual test set X_TEST ---------
+
 X_test_np, y_test_true, y_test_pred = None, None, None
 test_mse, test_r2 = None, None
 if df_test is not None:
@@ -253,24 +250,43 @@ if df_test is not None:
 else:
 	print(f"\nNote: Test file '{TEST_FILE_NAME}' not found. Visualizing training data only.")
 
+# 4. ------- visiolization result in graphs 2D or 3D  -----------------
+
 # generating titles for graphs
 title_text = f"PyTorch Poly Regression (Degree {POLY_DEGREE})<br>TRAIN: MSE = {final_mse:.3f} | R^2 = {final_r2_val:.3f}"
 if test_mse is not None and test_r2 is not None:
     title_text += f"<br>TEST:   MSE = {test_mse:.3f} | R^2 = {test_r2:.3f}"
 
-# 4. visiolization result
 if len(FEATURE_COLUMNS) == 1:
 	x_grid = np.linspace(X_raw.min() - 1, X_raw.max() + 1, 300).reshape(-1, 1)
 	y_line = predict_poly_torch(x_grid)
 
 	fig = go.Figure()
-	fig.add_trace(go.Scatter(x=X_raw.flatten(), y=y_raw.flatten(), mode="markers", marker=dict(size=10, color="red"), name="Excel data"))
-	fig.add_trace(go.Scatter(x=x_grid.ravel(), y=y_line.ravel(), mode="lines", line=dict(color="blue", width=2.5), name=f"Poly Line (R^2: {final_r2_val:.2f})"))
+	fig.add_trace(go.Scatter(
+		x=X_raw.flatten(), 
+		y=y_raw.flatten(), 
+		mode="markers", 
+		marker=dict(size=10, color="red"), 
+		name="Excel data"
+	))
+	fig.add_trace(go.Scatter(
+		x=x_grid.ravel(), 
+		y=y_line.ravel(), 
+		mode="lines", 
+		line=dict(color="blue", width=2.5), 
+		name=f"Poly Line (R^2: {final_r2_val:.2f})"
+	))
 	if X_test_np is not None:
 		x_display = X_test_np[:, 0]
 		y_display = y_test_true.flatten() if y_test_true is not None else y_test_pred.flatten()
 		name_display = "test real data" if y_test_true is not None else "test prediction"
-		fig.add_trace(go.Scatter(x=x_display.flatten(), y=y_display.flatten(), mode="markers", marker=dict(size=10, color="green", symbol="diamond"), name=name_display))
+		fig.add_trace(go.Scatter(
+			x=x_display.flatten(), 
+			y=y_display.flatten(), 
+			mode="markers", 
+			marker=dict(size=10, color="green", symbol="diamond"), 
+			name=name_display
+		))
 	fig.update_layout(title=title_text, xaxis_title=FEATURE_COLUMNS[0], yaxis_title=TARGET_COLUMN)
 	fig.show()
 
@@ -286,7 +302,14 @@ elif len(FEATURE_COLUMNS) == 2:
 	z_mesh = predict_poly_torch(grid_points).reshape(x_mesh.shape)
 
 	fig = go.Figure()
-	fig.add_trace(go.Scatter3d(x=X_raw[:, 0], y=X_raw[:, 1], z=y_raw.flatten(), mode="markers", marker=dict(size=6, color="red"), name="Exel data"))
+	fig.add_trace(go.Scatter3d(
+		x=X_raw[:, 0], 
+		y=X_raw[:, 1], 
+		z=y_raw.flatten(), 
+		mode="markers", 
+		marker=dict(size=5, color="red"), 
+		name="Exel data"
+	))
 	fig.add_trace(go.Surface(
 		x=x_range, 
 		y=y_range, 
@@ -310,7 +333,7 @@ elif len(FEATURE_COLUMNS) == 2:
 			y=X_test_np[:, 1], 
 			z=z_display, 
 			mode="markers", 
-			marker=dict(size=6, color="green", symbol="diamond"), 
+			marker=dict(size=5, color="green", symbol="diamond"), 
 			name=name_display
 		))
 	fig.update_layout(title=title_text, scene=dict(xaxis_title=FEATURE_COLUMNS[0], yaxis_title=FEATURE_COLUMNS[1], zaxis_title=TARGET_COLUMN))
